@@ -1,0 +1,7 @@
+{
+	"repository":{
+		"api_endpoint":"http://example.com/api",
+		"api_key_identity": null,
+		"api_key_credential": null,
+	}
+}
