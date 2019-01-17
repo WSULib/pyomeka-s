@@ -31,8 +31,23 @@ Instantiate repository instance, using API endpoint and credentials from `~/pyom
 repo = Repository()
 ```
 
-Retrieve 10 items:
+Retrieve 5 items as generator
 ```
-items = repo.get_items(per_page=10)
+for item in repo.get_items(per_page=5):
+    print(item.id)
+
+1
+2
+3
+4
+5
+```
+
+Get item:
+```
+```
+
+Get item property `dcterms:title`:
+```
 ```
 

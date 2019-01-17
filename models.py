@@ -1,6 +1,5 @@
 # pyomeka-s
 
-
 import json
 import os
 import requests
@@ -37,7 +36,7 @@ class Repository(object):
 			api_key_credential=self.api_key_credential)
 
 
-	def get_items(self, per_page=4):
+	def get_items(self, per_page=25):
 
 		'''
 		Method to list items in Repository
@@ -46,8 +45,18 @@ class Repository(object):
 			generator
 		'''
 
+		# api GET request
 		response = self.api.get('items', params={'per_page':per_page})
-		return response.json()
+
+		# return
+		if response.status_code == 200:
+
+			# parse JSON
+			response = response.json()
+
+			# yield
+			for item_json in response:
+				yield Item(item_json)
 
 
 
@@ -91,8 +100,32 @@ class Item(object):
 	Class to represent an Omeka-S Item
 	'''
 
-	def __init__(self):
-		pass
+	def __init__(self, item_json):
+
+		# store json
+		self.json = item_json
+
+		# id
+		self.id = self.json['o:id']
+
+
+	def get_property(self, prop):
+
+		return self.json.get(prop, None)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
