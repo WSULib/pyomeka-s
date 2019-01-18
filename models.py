@@ -130,6 +130,29 @@ class Repository(object):
 				return [ Vocabulary(self, vocab) for vocab in vocabs ]
 
 
+	def get_property(self, term):
+
+		'''
+		Method to return Property based on term
+			- assume full prefix:local_name as this level
+		'''
+
+		# api GET request
+		response = self.api.get('properties', params={'term':term})
+
+		# parse
+		if response.status_code == 200:
+
+			properties = response.json()
+
+			# if one, return as single Property
+			if len(properties) == 1:
+				return Property(self, properties[0])
+
+			else:
+				raise Exception('only expecting on property for this vocabulary for term: %s' % term)
+
+
 
 class API(object):
 
@@ -162,6 +185,21 @@ class API(object):
 
 		# issue GET request
 		return requests.get('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params)
+
+
+	def patch(self,
+		path,
+		params = {}):
+
+		'''
+		response = requests.put('%s/items/%s?key_identity=%s&key_credential=%s' % (config['do_api_endpoint'], item_id, config['os_api_key_identity'], config['os_api_key_credential']), json=resource)
+		'''
+
+		# credential
+		params = self._merge_credentials(params)
+
+		# issue GET request
+		return requests.patch('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params)
 
 
 
@@ -236,6 +274,71 @@ class Item(object):
 		value_instances = self.json.get(property_name, default)
 
 		return [ Value(self.repo, value_json) for value_json in value_instances ]
+
+
+	def add_property(self,
+		property_input,
+		value,
+		is_public=True,
+		property_type='literal'):
+
+		'''
+		Method to add Property
+			- literal values may repeat
+
+		Args:
+			term (str|Property): if string, assume prefix:local_name, else use Property
+			value: value to set for @value
+
+		Value instance:
+		{
+			'@value': '...',
+			'is_public': True,
+			'property_id': 1,
+			'property_label': 'Title',
+			'type': 'literal'
+	 	}
+		'''
+
+		# handle property_input
+		if type(property_input) == Property:
+
+			prop = property_input
+
+		elif type(property_input) == str:
+
+			# query for property_input id
+			prop = self.repo.get_property(property_input)
+
+		else:
+			raise Exception('expecting str or Property instance as property')
+
+		# build value dictionary
+		val_dict = {
+			'@value': value,
+			'is_public': True,
+			'property_id': prop.id,
+			'property_label': prop.label,
+			'type': property_type
+		}
+
+		# append if term exists, else create
+		if prop.term in self.get_properties().keys():
+			self.json[prop.term].append(val_dict)
+		else:
+			self.json[prop.term] = [val_dict]
+
+
+	def update(self):
+
+		'''
+		Method to update Item in Repository
+		'''
+
+		self.repo.api.patch()
+
+
+
 
 
 
