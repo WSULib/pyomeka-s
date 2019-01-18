@@ -621,7 +621,10 @@ class Value(object):
 	def __repr__(self, tlen=50):
 
 		if self.value != None:
-			value_repr = self.value[:tlen] + '..' if len(self.value) > tlen else self.value
+			if type(self.value) == str:
+				value_repr = self.value[:tlen] + '..' if len(self.value) > tlen else self.value
+			else:
+				value_repr = self.value
 		else:
 			value_repr = None
 
