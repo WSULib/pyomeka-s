@@ -2,6 +2,7 @@
 
 import json
 import logging
+import hashlib
 import os
 import pdb
 import requests
@@ -160,47 +161,124 @@ class API(object):
 	Class to handle API requests/responses
 	'''
 
-	def __init__(self, api_endpoint=None, api_key_identity=None, api_key_credential=None):
+	def __init__(self,
+		api_endpoint=None,
+		api_key_identity=None,
+		api_key_credential=None,
+		authenticate_all_requests=True):
 
 		self.api_endpoint = api_endpoint
 		self.api_key_identity = api_key_identity
 		self.api_key_credential = api_key_credential
+		self.authenticate_all_requests = authenticate_all_requests
+
+		# init cache
+		self.cache = APICache()
 
 
 	def _merge_credentials(self, params):
 
 		params.update({
-			'api_key_identity':self.api_key_identity,
-			'api_key_credential':self.api_key_credential
+			'key_identity':self.api_key_identity,
+			'key_credential':self.api_key_credential
 		})
 		return params
 
 
 	def get(self,
 		path,
-		params = {}):
+		params = {},
+		check_cache=True):
+
+		'''
+		GET requsts to API
+		'''
 
 		# credential
-		params = self._merge_credentials(params)
+		if self.authenticate_all_requests:
+			params = self._merge_credentials(params)
+
+		# check cache
+		if check_cache:
+			cache_hit = self.cache.cache_check('get', {'path':path,'params':params})
+			if cache_hit != None:
+				return cache_hit
 
 		# issue GET request
-		return requests.get('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params)
+		response = requests.get('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params)
+
+		# store cache
+		if response.status_code == 200:
+
+			if check_cache and cache_hit == None:
+				self.cache.cache_store('get', {'path':path,'params':params}, response)
+
+		# return
+		return response
 
 
 	def patch(self,
 		path,
+		json_body,
 		params = {}):
 
 		'''
-		response = requests.put('%s/items/%s?key_identity=%s&key_credential=%s' % (config['do_api_endpoint'], item_id, config['os_api_key_identity'], config['os_api_key_credential']), json=resource)
+		PATCH requsts to API
+			- for PATCH requests, credentials are needed
 		'''
 
 		# credential
 		params = self._merge_credentials(params)
+		logger.debug(params)
 
 		# issue GET request
-		return requests.patch('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params)
+		response = requests.patch('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params, json=json_body)
+		return response
 
+
+class APICache(object):
+
+	'''
+	Class for API Cache
+		- naive, lightweight
+		- only cache Property and Vocabulary queries
+			- unlikely to change
+	'''
+
+	def __init__(self):
+
+		self.store = {
+			'get':{},
+			'patch':{}
+		}
+
+
+	def _calc_cache_hash(self, dict):
+
+		'''
+		Calcuate MD5 hash based on dictionary
+		'''
+
+		return hashlib.md5(json.dumps(dict, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+	def cache_check(self, http_verb, dict):
+
+		'''
+		Check cache based on dict
+		'''
+
+		cache_hit = self.store.get(http_verb).get(self._calc_cache_hash(dict), None)
+		return cache_hit
+
+
+	def cache_store(self, http_verb, dict, response):
+
+		'''
+		Store response
+		'''
+
+		self.store[http_verb][self._calc_cache_hash(dict)] = response
 
 
 class Item(object):
@@ -217,6 +295,11 @@ class Item(object):
 		# store json
 		self.json = item_json
 
+		# init rollback versions with 0th version
+		self.versions = {
+			0:self.json
+		}
+
 
 	@property
 	def id(self):
@@ -230,6 +313,20 @@ class Item(object):
 
 	def __repr__(self):
 		return '<Item: #%s, "%s">' % (self.id, self.title)
+
+
+	def _calc_last_version_id(self):
+
+		'''
+		Method to return most recent version id
+
+		Returns:
+			(int): integer key of self.versions
+		'''
+
+		vkeys = list(self.versions.keys())
+		vkeys.sort()
+		return vkeys[-1]
 
 
 	@property
@@ -335,10 +432,29 @@ class Item(object):
 		Method to update Item in Repository
 		'''
 
-		self.repo.api.patch()
+		# PATCH with self.json
+		response = self.repo.api.patch('items/%s' % self.id, self.json)
 
+		if response.status_code == 200:
 
+			# write version
+			self.write_version(response.json())
 
+			# return
+			return True
+
+	def write_version(self, item_version_json):
+
+		'''
+		Method to write version
+		'''
+
+		# get new version to write
+		last_version_id = self._calc_last_version_id() + 1
+
+		# write
+		logger.debug('writing item v%s' % last_version_id)
+		self.versions[last_version_id] = item_version_json
 
 
 
