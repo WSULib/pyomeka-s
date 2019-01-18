@@ -219,21 +219,21 @@ class Item(object):
 
 		# loop and create subset
 		props = {}
-		for prop_name in self.json.keys():
-			if prop_name not in _omeka_internal and not prop_name.startswith('o:'):
-				props[prop_name] = [ Property(self.repo, prop_json) for prop_json in self.json.get(prop_name) ]
+		for property_name in self.json.keys():
+			if property_name not in _omeka_internal and not property_name.startswith('o:'):
+				props[property_name] = [ Value(self.repo, value_json) for value_json in self.json.get(property_name) ]
 
 		# return
 		return props
 
 
-	def get_property(self, prop_name, default=[]):
+	def get_property(self, property_name, default=[]):
 
 		'''
 		Return instance of single Property
 		'''
 
-		value_instances = self.json.get(prop_name, default)
+		value_instances = self.json.get(property_name, default)
 
 		return [ Value(self.repo, value_json) for value_json in value_instances ]
 
@@ -292,7 +292,7 @@ class Property(object):
 
 	@property
 	def vocabulary_id(self):
-		return self.json.get('o:comment').get('o:id')
+		return self.json.get('o:vocabulary').get('o:id')
 
 
 	def __repr__(self):
@@ -342,7 +342,12 @@ class Value(object):
 
 	def __repr__(self, tlen=50):
 
-		return '<Value: "%s">' % (self.value[:tlen] + '..' if len(self.value) > tlen else self.value)
+		if self.value != None:
+			value_repr = self.value[:tlen] + '..' if len(self.value) > tlen else self.value
+		else:
+			value_repr = None
+
+		return '<Value: "%s">' % (value_repr)
 
 
 	@property
@@ -448,6 +453,39 @@ class Vocabulary(object):
 			# yield
 			for property_json in response:
 				yield Property(self.repo, property_json)
+
+
+	def get_property(self, term):
+
+		'''
+		Method to return property
+
+		Args:
+			term (str): term, with or without Vocabulary namespace prefex
+		'''
+
+		# remove prefix if added
+		if self.prefix in term:
+			term = term.split('%s:')[-1]
+
+		# api GET request
+		response = self.repo.api.get('properties', params={'vocabulary_id':self.id, 'local_name':term})
+
+		# return
+		if response.status_code == 200:
+
+			# should only be one, confirm and return
+			properties = response.json()
+
+			if len(properties) == 1:
+				return Property(self.repo, properties[0])
+
+			else:
+				raise Exception('only expecting on property for this vocabulary for term: %s' % term)
+
+
+
+
 
 
 
