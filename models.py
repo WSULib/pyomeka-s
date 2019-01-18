@@ -47,7 +47,7 @@ class Repository(object):
 			api_key_credential=self.api_key_credential)
 
 
-	def get_items(self, per_page=25):
+	def get_items(self, per_page=25, use_cache=False):
 
 		'''
 		Method to list items in Repository
@@ -57,7 +57,7 @@ class Repository(object):
 		'''
 
 		# api GET request
-		response = self.api.get('items', params={'per_page':per_page})
+		response = self.api.get('items', params={'per_page':per_page}, use_cache=use_cache)
 
 		# return
 		if response.status_code == 200:
@@ -70,14 +70,14 @@ class Repository(object):
 				yield Item(self, item_json)
 
 
-	def get_item(self, item_id):
+	def get_item(self, item_id, use_cache=False):
 
 		'''
 		Method to return single item
 		'''
 
 		# api GET request
-		response = self.api.get('items/%s' % item_id, params={})
+		response = self.api.get('items/%s' % item_id, params={}, use_cache=use_cache)
 
 		# return
 		if response.status_code == 200:
@@ -150,8 +150,11 @@ class Repository(object):
 			if len(properties) == 1:
 				return Property(self, properties[0])
 
+			elif len(properties) == 0:
+				raise Exception('property not found: %s' % term)
+
 			else:
-				raise Exception('only expecting on property for this vocabulary for term: %s' % term)
+				raise Exception('expecting 1 but found %s properties for qualified term: %s' % (len(properties), term))
 
 
 
@@ -174,6 +177,7 @@ class API(object):
 
 		# init cache
 		self.cache = APICache()
+		self.use_cache = True
 
 
 	def _merge_credentials(self, params):
@@ -188,18 +192,22 @@ class API(object):
 	def get(self,
 		path,
 		params = {},
-		check_cache=True):
+		use_cache=None):
 
 		'''
 		GET requsts to API
 		'''
+
+		# handle caching flag
+		if use_cache == None:
+			use_cache = self.use_cache
 
 		# credential
 		if self.authenticate_all_requests:
 			params = self._merge_credentials(params)
 
 		# check cache
-		if check_cache:
+		if use_cache:
 			cache_hit = self.cache.cache_check('get', {'path':path,'params':params})
 			if cache_hit != None:
 				return cache_hit
@@ -210,7 +218,7 @@ class API(object):
 		# store cache
 		if response.status_code == 200:
 
-			if check_cache and cache_hit == None:
+			if use_cache and cache_hit == None:
 				self.cache.cache_store('get', {'path':path,'params':params}, response)
 
 		# return
@@ -234,6 +242,7 @@ class API(object):
 		# issue GET request
 		response = requests.patch('%s/%s' % (self.api_endpoint, path.lstrip('/')), params=params, json=json_body)
 		return response
+
 
 
 class APICache(object):
@@ -297,7 +306,7 @@ class Item(object):
 
 		# init rollback versions with 0th version
 		self.versions = {
-			0:self.json
+			0:self.json.copy()
 		}
 
 
@@ -362,15 +371,37 @@ class Item(object):
 		return props
 
 
-	def get_property(self, property_name, default=[]):
+	def get_property(self, property_input, default=[]):
 
 		'''
 		Return instance of single Property
 		'''
 
-		value_instances = self.json.get(property_name, default)
+		# handle property_input
+		prop = self._handle_property_arg(property_input)
+
+		value_instances = self.json.get(prop.term, default)
 
 		return [ Value(self.repo, value_json) for value_json in value_instances ]
+
+
+	def _handle_property_arg(self, property_input):
+
+		'''
+		Method to return Property instance given equivocal input
+		'''
+
+		# handle property_input
+		if type(property_input) == Property:
+			prop = property_input
+		elif type(property_input) == str:
+			# query for property_input id
+			prop = self.repo.get_property(property_input)
+		else:
+			raise Exception('expecting str or Property instance as property')
+
+		# return
+		return prop
 
 
 	def add_property(self,
@@ -398,17 +429,7 @@ class Item(object):
 		'''
 
 		# handle property_input
-		if type(property_input) == Property:
-
-			prop = property_input
-
-		elif type(property_input) == str:
-
-			# query for property_input id
-			prop = self.repo.get_property(property_input)
-
-		else:
-			raise Exception('expecting str or Property instance as property')
+		prop = self._handle_property_arg(property_input)
 
 		# build value dictionary
 		val_dict = {
@@ -424,6 +445,27 @@ class Item(object):
 			self.json[prop.term].append(val_dict)
 		else:
 			self.json[prop.term] = [val_dict]
+
+
+	def remove_value(self,
+		property_input,
+		value):
+
+		'''
+		Method to remove property from Item
+		'''
+
+		# handle property_input
+		prop = self._handle_property_arg(property_input)
+
+		# check self for property AND value
+		e_values = self.get_property(prop)
+
+		# comprehend values sans matches
+		values_keep = [ e_value for e_value in e_values if e_value.value != value ]
+
+		# update property
+		self.json[prop.term] = [ value.json for value in values_keep ]
 
 
 	def update(self):
@@ -443,6 +485,7 @@ class Item(object):
 			# return
 			return True
 
+
 	def write_version(self, item_version_json):
 
 		'''
@@ -455,6 +498,22 @@ class Item(object):
 		# write
 		logger.debug('writing item v%s' % last_version_id)
 		self.versions[last_version_id] = item_version_json
+
+
+	def refresh(self):
+
+		'''
+		Methdo to refresh Item
+		'''
+
+		# get self from repository
+		_item = self.repo.get_item(self.id, use_cache=False)
+
+		# write version
+		self.write_version(_item.json.copy())
+
+		# set
+		self.json = _item.json.copy()
 
 
 
